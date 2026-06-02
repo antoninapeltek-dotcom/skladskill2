@@ -221,10 +221,33 @@ with tab1:
                     key="abc"
                 )
             
-            # Второй ряд
-            col1, col2 = st.columns(2)
+            # Третий ряд - План на 6 месяцев
+            col1 = st.columns(1)[0]
             
             with col1:
+                # План на 6 месяцев
+                future_months = ['Июнь 2026', 'Июль 2026', 'Август 2026', 'Сентябрь 2026', 'Октябрь 2026', 'Ноябрь 2026']
+                plan_df = df[['Производитель', 'Номенклатура.Артикул ', 'Номенклатура',
+                             'Средняя дневная продажа', 'Текущий остаток']].copy()
+                
+                for month in future_months:
+                    if f'Прогноз {month}' in df.columns:
+                        plan_df[f'{month}'] = df[f'Прогноз {month}']
+                
+                plan_df['ИТОГО 6 мес'] = df['Потребность 6 мес'] if 'Потребность 6 мес' in df.columns else 0
+                
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    plan_df.to_excel(writer, sheet_name='План', index=False)
+                buffer.seek(0)
+                
+                st.download_button(
+                    label="📅 Plan_6_mesyacev.xlsx",
+                    data=buffer,
+                    file_name=f"Plan_6_mesyacev_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="plan6"
+                )
                 # Dashboard
                 by_brand = df.groupby('Производитель').agg({
                     'Код': 'count',

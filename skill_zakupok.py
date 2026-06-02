@@ -72,9 +72,59 @@ class SkillZakupok:
         
         return df
     
+    def calculate_month_coefficients(self):
+        """Рассчитываем коэффициенты сезонности для каждого месяца"""
+        df = self.df.copy()
+        
+        # Данные по месяцам с их днями
+        months_data = {
+            'Декабрь 2025': ('Декабрь 2025_Реализация месяц', 15),  # половина месяца
+            'Январь 2026': ('Январь 2026_Реализация месяц', 31),
+            'Февраль 2026': ('Февраль 2026_Реализация месяц', 28),  # 2026 - не високосный
+            'Март 2026': ('Март 2026_Реализация месяц', 31),
+            'Апрель 2026': ('Апрель 2026_Реализация месяц', 30),
+            'Май 2026': ('Май 2026_Реализация месяц', 31),
+        }
+        
+        # Рассчитываем дневные продажи для каждого месяца
+        daily_sales = {}
+        for month_name, (col_name, days) in months_data.items():
+            if col_name in df.columns:
+                daily_sales[month_name] = df[col_name].fillna(0) / days
+            else:
+                daily_sales[month_name] = 0
+        
+        # Рассчитываем среднюю дневную продажу за период
+        monthly_avg = pd.DataFrame(daily_sales).mean(axis=1)
+        
+        # Рассчитываем коэффициент для каждого месяца
+        self.month_coefficients = {}
+        for month_name, (col_name, days) in months_data.items():
+            if col_name in df.columns:
+                month_avg = df[col_name].fillna(0).mean()
+                overall_avg = df[[c for c, _ in months_data.values() if c in df.columns]].fillna(0).mean().mean()
+                if overall_avg > 0:
+                    self.month_coefficients[month_name] = month_avg / (overall_avg * days / 30)
+                else:
+                    self.month_coefficients[month_name] = 1.0
+        
+        # Коэффициенты для будущих месяцев (на основе истории)
+        self.month_coefficients['Июнь 2026'] = self.month_coefficients.get('Май 2026', 1.0) * 0.95
+        self.month_coefficients['Июль 2026'] = self.month_coefficients.get('Май 2026', 1.0) * 0.85
+        self.month_coefficients['Август 2026'] = self.month_coefficients.get('Май 2026', 1.0) * 0.90
+        self.month_coefficients['Сентябрь 2026'] = self.month_coefficients.get('Май 2026', 1.0) * 1.0
+        self.month_coefficients['Октябрь 2026'] = self.month_coefficients.get('Май 2026', 1.0) * 1.1
+        self.month_coefficients['Ноябрь 2026'] = self.month_coefficients.get('Май 2026', 1.0) * 1.3
+        self.month_coefficients['Декабрь 2026'] = self.month_coefficients.get('Май 2026', 1.0) * 1.25
+        
+        return self.month_coefficients
+    
     def calculate_average_daily_sales(self):
         """Рассчитываем среднюю дневную продажу"""
         df = self.df.copy()
+        
+        # Рассчитываем коэффициенты месяцев
+        self.calculate_month_coefficients()
         
         # Берём данные за периоды
         may_sales = df['Май 2026_Реализация месяц'].fillna(0)
@@ -85,19 +135,12 @@ class SkillZakupok:
         dec_sales = df['Декабрь 2025_Реализация месяц'].fillna(0)
         
         # Дни за каждый период
-        # Май 2026: 31 день
-        # Апрель: 30 дней
-        # Март: 31 день
-        # Февраль: 29 дней (2026 - простой год)
-        # Январь: 31 день
-        # Декабрь 2025: 15 дней (половина месяца работали)
-        
         may_daily = may_sales / 31
         apr_daily = apr_sales / 30
         mar_daily = mar_sales / 31
-        feb_daily = feb_sales / 28  # 2026 - не високосный
+        feb_daily = feb_sales / 28
         jan_daily = jan_sales / 31
-        dec_daily = dec_sales / 15  # Половина месяца
+        dec_daily = dec_sales / 15
         
         # Средняя за 6 месяцев
         avg_daily = (may_daily + apr_daily + mar_daily + feb_daily + jan_daily + dec_daily) / 6
@@ -111,19 +154,19 @@ class SkillZakupok:
         df = df.copy()
         
         # Требуемый остаток = среднедневная × 45 дней
-        df['Требуемый остаток'] = df['Средняя дневная продажа'] * self.dne_zapasa
+        df['Требуемый остаток'] = (df['Средняя дневная продажа'] * self.dne_zapasa).round(0).astype(int)
         
         # Текущий остаток на складе
-        df['Текущий остаток'] = df['СКЛАД_Кон. ост-к'].fillna(0)
+        df['Текущий остаток'] = df['СКЛАД_Кон. ост-к'].fillna(0).astype(int)
         
         # Товар в пути
-        df['В пути'] = df['Товар в пути_Кон. ост-к'].fillna(0)
+        df['В пути'] = df['Товар в пути_Кон. ост-к'].fillna(0).astype(int)
         
         # Эффективный остаток (текущий + в пути)
         df['Эффективный остаток'] = df['Текущий остаток'] + df['В пути']
         
-        # Рекомендуемое количество к заказу
-        df['К заказу'] = (df['Требуемый остаток'] - df['Эффективный остаток']).apply(lambda x: max(0, x))
+        # Рекомендуемое количество к заказу (ОКРУГЛЯЕМ!)
+        df['К заказу'] = (df['Требуемый остаток'] - df['Эффективный остаток']).apply(lambda x: max(0, int(np.ceil(x))))
         
         # Стоимость заказа
         df['Стоимость заказа'] = df['К заказу'] * df['Актуальная сред. цена']
@@ -138,6 +181,27 @@ class SkillZakupok:
                 return 'OK'
         
         df['Статус'] = df.apply(get_status, axis=1)
+        
+        # ПЛАН НА 6 МЕСЯЦЕВ
+        future_months = ['Июнь 2026', 'Июль 2026', 'Август 2026', 'Сентябрь 2026', 'Октябрь 2026', 'Ноябрь 2026']
+        month_days = {
+            'Июнь 2026': 30,
+            'Июль 2026': 31,
+            'Август 2026': 31,
+            'Сентябрь 2026': 30,
+            'Октябрь 2026': 31,
+            'Ноябрь 2026': 30,
+        }
+        
+        for month in future_months:
+            coeff = self.month_coefficients.get(month, 1.0)
+            days = month_days.get(month, 30)
+            # Прогноз = среднедневная × коэффициент месяца × дни месяца
+            df[f'Прогноз {month}'] = (df['Средняя дневная продажа'] * coeff * days).round(0).astype(int)
+        
+        # Итого на 6 месяцев
+        forecast_cols = [f'Прогноз {month}' for month in future_months]
+        df['Потребность 6 мес'] = df[forecast_cols].sum(axis=1)
         
         return df
     
@@ -292,7 +356,46 @@ class SkillZakupok:
         self.generate_recommendations(df, output_dir)
         print("  ✓ Рекомендации созданы")
         
+        # 6. НОВОЕ: План на 6 месяцев
+        self.generate_forecast_plan(df, output_dir)
+        print("  ✓ План на 6 месяцев создан")
+        
         print(f"\n✅ Все отчёты сохранены в {output_dir}")
+    
+    def generate_forecast_plan(self, df, output_dir):
+        """Генерируем план закупок на 6 месяцев"""
+        future_months = ['Июнь 2026', 'Июль 2026', 'Август 2026', 'Сентябрь 2026', 'Октябрь 2026', 'Ноябрь 2026']
+        
+        # Берём нужные колонки
+        plan_df = df[['Производитель', 'Номенклатура.Артикул ', 'Номенклатура',
+                      'Средняя дневная продажа', 'Текущий остаток', 'Актуальная сред. цена']].copy()
+        
+        # Добавляем прогнозы по месяцам
+        for month in future_months:
+            if f'Прогноз {month}' in df.columns:
+                plan_df[f'{month}'] = df[f'Прогноз {month}']
+        
+        # Добавляем потребность на 6 месяцев
+        plan_df['ИТОГО 6 мес'] = df['Потребность 6 мес']
+        
+        # Добавляем коэффициент месяца для справки
+        for month in future_months:
+            coeff = self.month_coefficients.get(month, 1.0)
+            plan_df[f'Коэфф {month}'] = f"{coeff:.2f}"
+        
+        plan_df = plan_df.sort_values('ИТОГО 6 мес', ascending=False)
+        
+        output_file = f"{output_dir}/Plan_6_mesyacev_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        plan_df.to_excel(output_file, sheet_name='План на 6 месяцев', index=False)
+        
+        # Также добавляем лист с коэффициентами
+        coeff_data = pd.DataFrame([
+            {'Месяц': month, 'Коэффициент сезонности': f"{self.month_coefficients.get(month, 1.0):.2f}"}
+            for month in future_months
+        ])
+        
+        with pd.ExcelWriter(output_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+            coeff_data.to_excel(writer, sheet_name='Коэффициенты', index=False)
     
     def generate_pu(self, df, output_dir):
         """Генерируем Purchase Order"""
@@ -445,4 +548,4 @@ if __name__ == '__main__':
     print("  4. ABC_Analiz_*.xlsx - ABC анализ")
     print("  5. Rekomendacii_*.xlsx - Рекомендации")
 
-
+EOF
