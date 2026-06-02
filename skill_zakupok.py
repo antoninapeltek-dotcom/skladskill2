@@ -548,4 +548,4 @@ if __name__ == '__main__':
     print("  4. ABC_Analiz_*.xlsx - ABC анализ")
     print("  5. Rekomendacii_*.xlsx - Рекомендации")
 
-EOF
+
